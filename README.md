@@ -42,9 +42,166 @@ Running and controlling turtles in the ROS system
 
 ### Lab 3  Motion Planning
 
+#### Part 1 Path Planning
 
+Path planning is the process of finding a path from the starting point to the target point in a given environment, taking into account any obstacles or restrictions that may exist (only the geometric constraints of the workspace are considered, not the kinematic constraints of the robot).
 
-==Report2搞过来==
+Figure 1 Relationship between path planning, obstacle avoidance planning, and trajectory planning
+
+![](assets/pic21.jpg)
+
+###### RRT algorithm
+
+Take the starting point as the root node of the tree, then randomly sample in the feasible space, find the tree node closest to the sampling point in the tree, generate new nodes and new paths based on the robot's execution ability, add them to the tree based on collision-free detection, and repeat the process until the tree node grows to the key area.
+
+Figure 2 RRT pseudocode and effect diagram
+
+![](assets/pic22.jpg)
+
+###### AStar algorithm
+
+Based on the breadth-first search defined by priority, according to the heuristic evaluation function:
+$$ f(n) = g(n) + h(n) $$
+
+Select the node with the smallest path cost as the next exploration node.
+
+##### Experimental steps
+
+Implement the corresponding algorithms in Astar.py and RRT.py respectively, and then call them in main.py given by the teaching assistant.
+
+##### Difficulties encountered
+
+Mainly appear in parameter adjustment, such as if the expansion is set too large, the car sometimes hits the set obstacles; the speed and acceleration of the car are too large or too small, which is not suitable.
+
+1. The specific implementation of the A* algorithm was not mentioned in class, but since A* is also a commonly used path planning algorithm, I also implemented it.
+2. 𝑛 represents a node; 𝑔(𝑛) represents the actual cost from the starting point to the node, that is, the cost in the Dijkstra algorithm; ℎ(𝑛) is the estimated cost of the best path from the node to the target point, that is, the Euclidean distance from the node to the end point.
+
+###### Comparison between RRT and Astar
+
+|                          | RRT                                      | AStar                                          |
+| ------------------------ | ---------------------------------------- | ---------------------------------------------- |
+| **Algorithm idea**       | Random sampling                          | Heuristic algorithm                            |
+| **Time complexity**      | O(n)                                     | O(b^d)                                         |
+| **Storage consumption**  | Less                                     | More                                           |
+| **Applicable scenarios** | A small number of nodes and known graphs | Complex environment and high-dimensional space |
+| ** Python simulation| ![](assets/pic23.jpg) |![](assets/pic24.jpg)   |
+
+#### Part 2 Obstacle avoidance planning
+
+##### DWA algorithm
+
+DWA (Dynamic Window Algorithm), that is, dynamic window method, constructs a feasible speed space based on speed control motion, and selects the optimal speed control instruction in the feasible speed space:
+
+$$ \text{evaluation} = \alpha \cdot \text{heading} + \beta \cdot \text{dist} + \gamma \cdot \text{velocity} $$
+
+- **heading**: Heading towards the target point, ensuring that the robot moves towards the target point.
+
+```python
+def heading_cost(self, xf, yf, xt, yt, robot_inf):
+angle = np.arctan2((yt - yf),(xt - xf)) - robot_inf[2]
+dist = np.sqrt(math.pow((xt - xf), 2) + math.pow((yt - yf), 2))
+return 2 * np.abs(angle) + dist
+```
+
+- **dist**: Stay away from obstacles, ensuring that the robot avoids obstacles and does not collide safely.
+
+```python
+def dist_cost(self, dwa, robot_inf, plan, rad):
+dist = 100000
+for i in range(int(dwa.predict_time / dwa.dt)):
+for obs in plan:
+now_dist = np.sqrt(math.pow((obs[0] - robot_inf[0]), 2) + math.pow((obs[1] - robot_inf[1]), 2)) - rad
+if now_dist < 0:
+return 100000
+else:
+dist = min(now_dist, dist)
+return 1.0 / dist
+```
+
+- **velocity**: Maximize the speed to ensure that the robot moves at the maximum speed.
+
+```python
+def velocity_cost(self, now_v, max_v):
+return max_v - now_v
+```
+
+##### Experimental steps
+
+Implement dwaplanner.py, and then call Astar.py (which I used) or RRT.py written in the previous experiment.
+
+##### Difficulties encountered
+
+The main problem still occurs in parameter adjustment, specifically:
+
+1. The car turns too far, and the factors to consider when modifying:
+
+- The radius of the obstacle is too large
+
+- The angular velocity range of the car is too large, and the speed limit is too large
+
+- The predicted point in front of the car is far from the current position
+
+2. When the car is more inclined to reverse or circle rather than bypass the obstacle from the side:
+
+- The obstacle is placed too close to the car
+
+- The angular velocity range given by the car is not large enough
+
+I also realized that Python is a scripting language, so errors will occur when the interpreter cannot understand Chinese comments.
+
+Figure 3 DWA before parameter adjustment & Figure 4 DWA after parameter adjustment and with radar
+
+![](assets/pic25.png)
+
+#### Part 3 Trajectory generation and simulation
+
+According to the robot's kinematic model and constraints, find appropriate control commands to convert feasible paths into feasible trajectories in Gazebo and Rviz.
+
+This experiment mainly requires the completion of the two files a_star.py and dwa.py. The parameters in experiments 5 and 6 cannot be directly applied. To match the size of the car, many parameter adjustments are required. Since the corresponding algorithms have been implemented in Astar.py and RRT.py respectively in the previous experiments, a_star.py only needs some parameter changes.
+
+##### File organization
+
+```
+└── course_agv_nav
+├── CMakeLists.txt
+├── config
+├── launch
+│ ├── nav.launch
+│ └── nav.rviz
+├── msg
+├── package.xml
+├── scripts
+│ ├── global_planner.py
+│ ├── a_star.py
+│ ├── local_planner.py
+│ └── dwa.py
+└── srv
+```
+
+##### Difficulties encountered
+
+- **Rollover**: sudden braking and driving, dynamic window opened too large, and reverse range too large.
+- **Reduce the reward for obstacle avoidance**, reduce the expansion radius of obstacles. In practice, it will be more effective to reduce the reward function.
+
+Figure 5 Rollover & Figure 6 Turning too large
+
+![](assets/pic26.png)
+
+Turning too large means not only that the angular acceleration cannot be too large, but also that the maximum linear velocity cannot be too large; on the other hand, the expansion radius of the obstacle cannot be too large, otherwise it will also lead to a large turning radius, and turning in a small space may not necessarily return to the normal trajectory.
+
+##### Slow calculation speed
+
+Some calculation statements need to be optimized. Calculating a large number of obstacle coordinates will lead to slow code execution and jamming. You can use more operations in the numpy library instead of ordinary operation symbols; at the same time, you can consider only calculating some obstacle points within the robot's field of view to reduce the amount of calculation and memory consumption.
+
+##### Final effect
+
+Figure 7 Trajectory planning simulation under Rviz
+
+![](assets/pic27.jpg)
+
+Figure 8 Trajectory planning simulation under Gazebo
+
+![](assets/pic28.jpg)
 
 ### Lab 4 ICP Algorithm
 
